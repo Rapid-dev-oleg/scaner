@@ -49,7 +49,8 @@ sqlite.exec(`
     startedAt TEXT,
     completedAt TEXT,
     terminalOutput TEXT DEFAULT '',
-    error TEXT
+    error TEXT,
+    shareToken TEXT
   );
 
   CREATE TABLE IF NOT EXISTS findings (
@@ -90,6 +91,13 @@ sqlite.exec(`
   CREATE INDEX IF NOT EXISTS idx_scans_monitor ON scans(monitorId);
   CREATE INDEX IF NOT EXISTS idx_findings_scan ON findings(scanId);
 `);
+
+// ─── Lightweight migrations for pre-existing databases ───
+const scanColumns = sqlite.prepare('PRAGMA table_info(scans)').all().map(c => c.name);
+if (!scanColumns.includes('shareToken')) {
+  sqlite.exec('ALTER TABLE scans ADD COLUMN shareToken TEXT');
+}
+sqlite.exec('CREATE INDEX IF NOT EXISTS idx_scans_token ON scans(shareToken)');
 
 // ─── (de)serialization helpers ───
 const JSON_FIELDS = {
@@ -161,6 +169,7 @@ const db = {
   // ─── SCANS ───
   scans: () => sqlite.prepare('SELECT * FROM scans ORDER BY COALESCE(startedAt, queuedAt) DESC').all(),
   getScan: (id) => sqlite.prepare('SELECT * FROM scans WHERE id=?').get(id),
+  getScanByToken: (token) => token ? sqlite.prepare('SELECT * FROM scans WHERE shareToken=?').get(token) : undefined,
   insertScan: (s) => upsert('scans', 'id', s),
   updateScan: (id, updates) => patchRow('scans', 'id', id, updates),
   deleteScansByMonitor: (monitorId) => sqlite.prepare('DELETE FROM scans WHERE monitorId=?').run(monitorId),

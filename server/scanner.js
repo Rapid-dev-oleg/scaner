@@ -2,8 +2,14 @@
 // live terminal streaming (SSE) and rich Nuclei output parsing.
 const { spawn } = require('child_process');
 const { EventEmitter } = require('events');
+const crypto = require('crypto');
 const db = require('./db');
 const { sendNotifications } = require('./notifications');
+
+function reportUrlFor(token) {
+  const base = (process.env.PUBLIC_BASE_URL || '').replace(/\/+$/, '');
+  return base && token ? `${base}/r/${token}` : null;
+}
 
 const generateId = (prefix) => `${prefix}-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
 
@@ -53,6 +59,7 @@ function enqueueScan(monitor, { scheduled = false } = {}) {
     completedAt: null,
     terminalOutput: `[INF] ${scheduled ? 'Scheduled scan' : 'Scan'} queued for ${monitor.url}\n`,
     error: null,
+    shareToken: crypto.randomBytes(16).toString('hex'),
   };
   db.insertScan(scan);
   emit(scanId, { type: 'status', status: 'queued' });
@@ -342,7 +349,9 @@ function finalize(scanId, duration, status, term, findings, monitor) {
   emit(scanId, { type: 'done', status, findings: keep.length });
 
   if (status === 'completed') {
-    sendNotifications(keep, monitor).catch(err => console.error('[Scan] Notifications failed:', err.message || err));
+    const token = db.getScan(scanId)?.shareToken;
+    sendNotifications(keep, monitor, reportUrlFor(token))
+      .catch(err => console.error('[Scan] Notifications failed:', err.message || err));
   }
   console.log(`[Scan] ${scanId} ${status} — ${keep.length} findings for ${monitor.url}`);
 }

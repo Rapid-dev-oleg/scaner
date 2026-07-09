@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
-import { Clock, Search, Filter, ExternalLink, Loader2, CheckCircle, XCircle, Square, Ban, Download, ChevronDown } from 'lucide-react';
+import { Clock, Search, Filter, ExternalLink, Loader2, CheckCircle, XCircle, Square, Ban, Download, ChevronDown, Share2 } from 'lucide-react';
 import TopBar from '@/components/TopBar';
 import SeverityBadge from '@/components/SeverityBadge';
 import { useMonitors } from '@/contexts/MonitorsContext';
+import { useApp } from '@/contexts/AppContext';
 import { api } from '@/api';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -11,6 +12,8 @@ import type { Scan, Finding } from '@/types';
 
 export default function ScanHistory() {
   const { scans, isLoading, stopScan } = useMonitors();
+  const { addToast } = useApp();
+  const [sharing, setSharing] = useState(false);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [dateRange, setDateRange] = useState<'24h' | '7d' | '30d' | 'all'>('7d');
@@ -57,6 +60,21 @@ export default function ScanHistory() {
       setSelectedScan(data);
       setSelectedFindings(data.findings || []);
     } catch { /* keep what we have */ }
+  };
+
+  const shareReport = async () => {
+    if (!selectedScan) return;
+    setSharing(true);
+    try {
+      const { url } = await api.shareScan(selectedScan.id);
+      const link = url || `${window.location.origin}/r/`;
+      try { await navigator.clipboard.writeText(link); } catch { /* clipboard may be blocked */ }
+      addToast({ type: 'success', title: 'Public link copied', message: link });
+    } catch (err: any) {
+      addToast({ type: 'alert', title: 'Share failed', message: err.message });
+    } finally {
+      setSharing(false);
+    }
   };
 
   const exportScan = () => {
@@ -194,11 +212,18 @@ export default function ScanHistory() {
                       <span className="text-[11px] px-1.5 py-0.5 rounded font-medium" style={{ backgroundColor: 'rgba(0,212,170,0.1)', color: 'var(--accent-cyan)' }}>{selectedFindings.length} findings</span>
                     </div>
                   </div>
-                  <button onClick={exportScan} title="Export report (JSON)"
-                    className="flex items-center gap-1.5 h-8 px-3 rounded-md text-[12px] font-medium border flex-shrink-0 focus-ring"
-                    style={{ backgroundColor: 'var(--bg-tertiary)', borderColor: 'var(--border-subtle)', color: 'var(--text-secondary)' }}>
-                    <Download size={13} /> Export
-                  </button>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <button onClick={shareReport} disabled={sharing} title="Copy public report link"
+                      className="flex items-center gap-1.5 h-8 px-3 rounded-md text-[12px] font-medium border focus-ring disabled:opacity-50"
+                      style={{ backgroundColor: 'rgba(0,212,170,0.1)', borderColor: 'var(--accent-cyan)', color: 'var(--accent-cyan)' }}>
+                      {sharing ? <Loader2 size={13} className="animate-spin-slow" /> : <Share2 size={13} />} Share
+                    </button>
+                    <button onClick={exportScan} title="Export report (JSON)"
+                      className="flex items-center gap-1.5 h-8 px-3 rounded-md text-[12px] font-medium border focus-ring"
+                      style={{ backgroundColor: 'var(--bg-tertiary)', borderColor: 'var(--border-subtle)', color: 'var(--text-secondary)' }}>
+                      <Download size={13} /> Export
+                    </button>
+                  </div>
                 </div>
               </DialogHeader>
 

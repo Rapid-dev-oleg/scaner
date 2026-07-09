@@ -19,7 +19,7 @@ function buildSummary(findings) {
   return `Scan complete: ${findings.length} findings (${parts.join(', ')})`;
 }
 
-async function sendEmail(config, summary, findings) {
+async function sendEmail(config, summary, findings, reportUrl) {
   const address = config.address || process.env.EMAIL_ADDRESS;
   if (!address) return;
 
@@ -44,15 +44,16 @@ async function sendEmail(config, summary, findings) {
     return `[${(f.severity || 'info').toUpperCase()}] ${f.name} — ${f.matchedAt || f.host || ''}`;
   }).join('\n');
 
+  const linkText = reportUrl ? `\n\nView full report: ${reportUrl}` : '';
   await transporter.sendMail({
     from,
     to: address,
     subject: `Sentinel: ${summary}`,
-    text: `${summary}\n\n${findingLines || 'No findings'}`,
+    text: `${summary}\n\n${findingLines || 'No findings'}${linkText}`,
   });
 }
 
-async function sendSlack(config, summary, findings) {
+async function sendSlack(config, summary, findings, reportUrl) {
   const webhook = config.webhook || process.env.SLACK_WEBHOOK;
   if (!webhook) return;
 
@@ -74,22 +75,24 @@ async function sendSlack(config, summary, findings) {
         { type: 'section', text: { type: 'mrkdwn', text: summary } },
         { type: 'divider' },
         ...blocks,
+        ...(reportUrl ? [{ type: 'section', text: { type: 'mrkdwn', text: `<${reportUrl}|📄 View full report>` } }] : []),
       ],
     }),
   });
 }
 
-async function sendTelegram(config, summary) {
+async function sendTelegram(config, summary, reportUrl) {
   const botToken = config.botToken || process.env.TELEGRAM_BOT_TOKEN;
   const chatId = config.chatId || process.env.TELEGRAM_CHAT_ID;
   if (!botToken || !chatId) return;
 
+  const link = reportUrl ? `\n\n[📄 View full report](${reportUrl})` : '';
   const res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       chat_id: chatId,
-      text: `🛡️ *Sentinel Scan*\n\n${summary}`,
+      text: `🛡️ *Sentinel Scan*\n\n${summary}${link}`,
       parse_mode: 'Markdown',
     }),
   });
@@ -99,7 +102,7 @@ async function sendTelegram(config, summary) {
   }
 }
 
-async function sendDiscord(config, summary, findings) {
+async function sendDiscord(config, summary, findings, reportUrl) {
   const webhook = config.webhook || process.env.DISCORD_WEBHOOK;
   if (!webhook) return;
 
@@ -115,7 +118,8 @@ async function sendDiscord(config, summary, findings) {
     body: JSON.stringify({
       embeds: [{
         title: 'Sentinel Scan Report',
-        description: summary,
+        url: reportUrl || undefined,
+        description: reportUrl ? `${summary}\n\n[📄 View full report](${reportUrl})` : summary,
         color: findings.length > 0 ? 0xff0000 : 0x00ff00,
         fields,
         timestamp: new Date().toISOString(),
@@ -124,18 +128,18 @@ async function sendDiscord(config, summary, findings) {
   });
 }
 
-async function sendWebhook(config, summary, findings) {
+async function sendWebhook(config, summary, findings, reportUrl) {
   const url = config.url || process.env.WEBHOOK_URL;
   if (!url) return;
 
   await fetch(url, {
     method: config.method || 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ summary, findings, timestamp: new Date().toISOString() }),
+    body: JSON.stringify({ summary, findings, reportUrl: reportUrl || null, timestamp: new Date().toISOString() }),
   });
 }
 
-async function sendNotifications(findings, monitor) {
+async function sendNotifications(findings, monitor, reportUrl) {
   const db = require('./db');
   const channels = db.channels().filter(c => c.enabled);
   if (channels.length === 0) return;
@@ -147,19 +151,19 @@ async function sendNotifications(findings, monitor) {
       const config = channel.config || {};
       switch (channel.type) {
         case 'email':
-          await sendEmail(config, summary, findings);
+          await sendEmail(config, summary, findings, reportUrl);
           break;
         case 'slack':
-          await sendSlack(config, summary, findings);
+          await sendSlack(config, summary, findings, reportUrl);
           break;
         case 'telegram':
-          await sendTelegram(config, summary);
+          await sendTelegram(config, summary, reportUrl);
           break;
         case 'discord':
-          await sendDiscord(config, summary, findings);
+          await sendDiscord(config, summary, findings, reportUrl);
           break;
         case 'webhook':
-          await sendWebhook(config, summary, findings);
+          await sendWebhook(config, summary, findings, reportUrl);
           break;
         default:
           console.log(`[Notifier] Unknown channel type: ${channel.type}`);

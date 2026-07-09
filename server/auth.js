@@ -45,6 +45,8 @@ function middleware(req, res, next) {
   if (req.method === 'OPTIONS') return next();
   // Only guard the API — the frontend (HTML/JS/CSS + login screen) is public.
   if (!req.path.startsWith('/api')) return next();
+  // Public shared-report data is intentionally open (unguessable token).
+  if (req.path.startsWith('/api/public/')) return next();
   if (PUBLIC.has(req.path)) return next();
   if (isValid(bearer(req))) return next();
   return res.status(401).json({ error: 'Unauthorized' });

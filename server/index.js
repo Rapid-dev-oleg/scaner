@@ -7,6 +7,15 @@ const auth = require('./auth');
 const scanner = require('./scanner');
 const templates = require('./templates');
 const { testChannel } = require('./notifications');
+const { renderReportHtml } = require('./report');
+const crypto = require('crypto');
+
+function publicBase(req) {
+  if (process.env.PUBLIC_BASE_URL) return process.env.PUBLIC_BASE_URL.replace(/\/+$/, '');
+  const proto = req.headers['x-forwarded-proto'] || req.protocol || 'http';
+  const host = req.headers['x-forwarded-host'] || req.headers.host;
+  return `${proto}://${host}`;
+}
 
 const app = express();
 app.use(cors());
@@ -94,6 +103,42 @@ app.post('/api/scans', (req, res) => {
 app.post('/api/scans/:id/stop', (req, res) => {
   const ok = scanner.stopScan(req.params.id);
   ok ? res.json({ stopped: true }) : res.status(404).json({ error: 'Scan not active' });
+});
+
+// Ensure (or return) a public share link for a scan
+app.post('/api/scans/:id/share', (req, res) => {
+  const scan = db.getScan(req.params.id);
+  if (!scan) return res.status(404).json({ error: 'Not found' });
+  let token = scan.shareToken;
+  if (!token) {
+    token = crypto.randomBytes(16).toString('hex');
+    db.updateScan(scan.id, { shareToken: token });
+  }
+  res.json({ token, url: `${publicBase(req)}/r/${token}` });
+});
+
+// Revoke a share link
+app.delete('/api/scans/:id/share', (req, res) => {
+  const scan = db.getScan(req.params.id);
+  if (!scan) return res.status(404).json({ error: 'Not found' });
+  db.updateScan(scan.id, { shareToken: null });
+  res.json({ revoked: true });
+});
+
+// ─── PUBLIC SHARED REPORT (no auth — unguessable token) ───
+app.get('/api/public/report/:token', (req, res) => {
+  const scan = db.getScanByToken(req.params.token);
+  if (!scan) return res.status(404).json({ error: 'Not found' });
+  const { terminalOutput, ...meta } = scan;
+  res.json({ ...meta, findings: db.findingsByScan(scan.id) });
+});
+
+app.get('/r/:token', (req, res) => {
+  const scan = db.getScanByToken(req.params.token);
+  if (!scan) return res.status(404).type('html').send('<h1 style="font-family:sans-serif">Report not found or link revoked</h1>');
+  const findings = db.findingsByScan(scan.id);
+  const monitor = db.getMonitor(scan.monitorId);
+  res.type('html').send(renderReportHtml(scan, findings, monitor));
 });
 
 // Live terminal stream (Server-Sent Events)

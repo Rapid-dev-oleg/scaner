@@ -61,6 +61,8 @@ export const api = {
   getScan: (id: string) => request<any>(`/scans/${id}`),
   triggerScan: (monitorId: string) => request<any>('/scans', { method: 'POST', body: JSON.stringify({ monitorId }) }),
   stopScan: (id: string) => request<any>(`/scans/${id}/stop`, { method: 'POST' }),
+  shareScan: (id: string) => request<{ token: string; url: string }>(`/scans/${id}/share`, { method: 'POST' }),
+  unshareScan: (id: string) => request<any>(`/scans/${id}/share`, { method: 'DELETE' }),
   getQueue: () => request<{ running: string[]; queued: string[]; maxConcurrent: number }>('/scans/queue'),
   streamUrl: (id: string) => `${API_BASE}/scans/${id}/stream${auth.token ? `?token=${encodeURIComponent(auth.token)}` : ''}`,
 

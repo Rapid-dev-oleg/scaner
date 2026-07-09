@@ -37,21 +37,26 @@ export default function ScanProgressBar({ scanId, initial, live = false, showMet
     return () => es.close();
   }, [scanId, live]);
 
+  const crawling = prog?.phase === 'crawl';
   const pct = prog ? Math.min(100, Math.max(0, prog.percent)) : 0;
   return (
     <div>
       <div className="flex items-center justify-between text-[11px] mb-1" style={{ color: 'var(--text-muted)' }}>
-        <span>{label}{prog ? '' : '… starting'}</span>
-        {prog && <span style={{ color: 'var(--accent-cyan)' }}>{pct}%</span>}
+        <span>{crawling ? 'Crawling' : label}{prog ? '' : '… starting'}</span>
+        {prog && !crawling && <span style={{ color: 'var(--accent-cyan)' }}>{pct}%</span>}
+        {crawling && <span style={{ color: 'var(--accent-cyan)' }}>{prog!.requests} URLs</span>}
       </div>
       <div className="h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--bg-tertiary)' }}>
-        <div className={`h-full ${prog ? 'transition-all duration-500' : 'animate-pulse'}`}
-          style={{ width: `${prog ? pct : 30}%`, backgroundColor: 'var(--accent-cyan)' }} />
+        <div className={`h-full ${prog && !crawling ? 'transition-all duration-500' : 'animate-pulse'}`}
+          style={{ width: `${prog && !crawling ? pct : 30}%`, backgroundColor: 'var(--accent-cyan)' }} />
       </div>
-      {showMeta && prog && (
+      {showMeta && prog && !crawling && (
         <div className="text-[10px] mt-1" style={{ color: 'var(--text-muted)' }}>
           {prog.requests.toLocaleString()}/{prog.total.toLocaleString()} req · {prog.rps} rps{prog.errors ? ` · ${prog.errors} errors` : ''}
         </div>
+      )}
+      {showMeta && crawling && (
+        <div className="text-[10px] mt-1" style={{ color: 'var(--text-muted)' }}>discovering endpoints…</div>
       )}
     </div>
   );

@@ -1,13 +1,14 @@
 # Sentinel Security Monitor — Full Stack Docker
 #
 # Multi-stage build:
-#  1. Fetch pre-built Nuclei CLI
+#  1. Fetch pre-built Nuclei + Katana CLIs
 #  2. Node stage — builds frontend
 #  3. Runtime — serves everything
 
-# --- Stage 1: Fetch Nuclei CLI ---
+# --- Stage 1: Fetch Nuclei + Katana CLIs ---
 FROM alpine:3.21 AS nuclei-builder
 ARG NUCLEI_VERSION=3.11.0
+ARG KATANA_VERSION=1.6.1
 RUN apk add --no-cache wget unzip ca-certificates
 RUN ARCH=$(uname -m); \
     case "$ARCH" in \
@@ -16,9 +17,12 @@ RUN ARCH=$(uname -m); \
       *) echo "Unsupported architecture: $ARCH"; exit 1 ;; \
     esac && \
     wget -q "https://github.com/projectdiscovery/nuclei/releases/download/v${NUCLEI_VERSION}/nuclei_${NUCLEI_VERSION}_linux_${ARCH}.zip" -O /tmp/nuclei.zip && \
-    unzip /tmp/nuclei.zip -d /usr/local/bin && \
+    unzip -o -j /tmp/nuclei.zip nuclei -d /usr/local/bin && \
     chmod +x /usr/local/bin/nuclei && \
-    rm /tmp/nuclei.zip && \
+    wget -q "https://github.com/projectdiscovery/katana/releases/download/v${KATANA_VERSION}/katana_${KATANA_VERSION}_linux_${ARCH}.zip" -O /tmp/katana.zip && \
+    unzip -o -j /tmp/katana.zip katana -d /usr/local/bin && \
+    chmod +x /usr/local/bin/katana && \
+    rm /tmp/nuclei.zip /tmp/katana.zip && \
     nuclei -update-templates
 
 # --- Stage 2: Build Frontend ---
@@ -39,8 +43,9 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates wget \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy Nuclei binary + templates (nuclei is a static Go binary — runs on Debian)
+# Copy Nuclei + Katana binaries + templates (static Go binaries — run on Debian)
 COPY --from=nuclei-builder /usr/local/bin/nuclei /usr/local/bin/nuclei
+COPY --from=nuclei-builder /usr/local/bin/katana /usr/local/bin/katana
 COPY --from=nuclei-builder /root/nuclei-templates /root/nuclei-templates
 
 # Copy built frontend

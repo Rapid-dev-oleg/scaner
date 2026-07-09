@@ -50,6 +50,7 @@ export interface ScanProgress {
   matched: number;
   errors: number;
   duration: string;
+  phase?: 'crawl' | 'scan';
 }
 
 export interface Monitor {

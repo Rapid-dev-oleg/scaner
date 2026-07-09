@@ -5,6 +5,7 @@ const { EventEmitter } = require('events');
 const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 const db = require('./db');
 const { sendNotifications } = require('./notifications');
 const { templatesDir } = require('./templates');
@@ -145,74 +146,29 @@ function makeTerminal(scanId, initial = []) {
   };
 }
 
-// ─── Nuclei runner (falls back to a mock scan if the CLI is absent) ───
+// ─── Scan runner: optional katana crawl → nuclei (falls back to mock if nuclei absent) ───
 function runNuclei(scanId, monitor) {
   const adv = monitor.advanced || {};
-  // No -silent: we want nuclei's progress/info on stderr so it streams live.
-  // -stats + -si prints a periodic progress line so the terminal never looks dead.
-  const args = ['-u', monitor.url, '-rl', String(adv.rateLimit || 150),
-    '-timeout', String(adv.timeout || 30), '-j', '-stats', '-si', '5'];
-
-  if (monitor.templateMode === 'categories' && monitor.templateCategories?.length) {
-    const tags = monitor.templateCategories.map(c => TAG_MAP[c] || c).join(',');
-    args.push('-tags', tags);
-  }
-  if (monitor.templateMode === 'custom' && monitor.customTemplates?.length) {
-    const dir = templatesDir();
-    for (const raw of monitor.customTemplates) {
-      const val = String(raw).trim();
-      if (!val) continue;
-      // Prefer an exact template file path (-t); fall back to id match (-id).
-      const rel = /\.ya?ml$/.test(val) ? val : `${val}.yaml`;
-      const full = dir ? path.join(dir, rel) : null;
-      if (full && fs.existsSync(full)) args.push('-t', full);
-      else args.push('-id', val.replace(/\.ya?ml$/, ''));
-    }
-  }
-  if (adv.userAgent) args.push('-H', `User-Agent: ${adv.userAgent}`);
-  if (adv.followRedirects === false) args.push('-no-redirects');
-
-  const term = makeTerminal(scanId, [
-    `[INF] nuclei ${args.join(' ')}`,
-    `[INF] Scanning ${monitor.url}...`,
-  ]);
+  const term = makeTerminal(scanId, [`[INF] Scanning ${monitor.url}...`]);
   const start = Date.now();
   const findings = [];
   let started = false;
+  let settled = false; // guards against 'error' and 'close' both finalizing
 
   const state = { proc: null, cancelled: false, timedOut: false, killTimer: null };
   running.set(scanId, state);
-  let settled = false; // guards against 'error' and 'close' both finalizing
 
-  let proc;
-  try {
-    proc = spawn('nuclei', args, { shell: false });
-  } catch (err) {
-    running.delete(scanId);
-    return runMockScan(scanId, monitor);
-  }
-  state.proc = proc;
-
-  // Global per-scan timeout so a heavy "All templates" run can't hang forever.
+  // Whole-scan timeout (covers crawl + nuclei). Kills whatever process is current.
   const timeoutMin = Number(db.settings().scanTimeoutMinutes);
   if (Number.isFinite(timeoutMin) && timeoutMin > 0) {
     state.killTimer = setTimeout(() => {
       state.timedOut = true;
-      term.push(`[ERR] Scan timed out after ${timeoutMin} min — stopping nuclei`);
-      try { proc.kill('SIGKILL'); } catch { /* ignore */ }
+      term.push(`[ERR] Scan timed out after ${timeoutMin} min — stopping`);
+      if (state.proc) { try { state.proc.kill('SIGKILL'); } catch { /* ignore */ } }
     }, timeoutMin * 60000);
   }
 
-  proc.on('error', () => {
-    // spawn failed (nuclei not installed) → fall back to mock, unless cancelled
-    if (settled) return;
-    settled = true;
-    running.delete(scanId);
-    if (state.cancelled) return finalize(scanId, Date.now() - start, 'cancelled', term, findings, monitor);
-    return runMockScan(scanId, monitor);
-  });
-
-  // Detect nuclei's -stats JSON line (progress), which appears on stderr/stdout.
+  // ── shared progress/stats helpers ──
   const asStats = (t) => {
     if (!t.startsWith('{') || t.indexOf('"percent"') === -1) return null;
     try {
@@ -228,7 +184,6 @@ function runNuclei(scanId, monitor) {
   const emitProgress = (p) => {
     const total = clampNum(p.total, 1e9);
     const progress = {
-      // nuclei emits a garbage percent/rps when total is 0 (int64 overflow) — clamp it
       percent: total > 0 ? clampNum(p.percent, 100) : 0,
       requests: clampNum(p.requests, 1e9),
       total,
@@ -236,73 +191,173 @@ function runNuclei(scanId, monitor) {
       matched: clampNum(p.matched, 1e9),
       errors: clampNum(p.errors, 1e9),
       duration: p.duration || '',
+      phase: 'scan',
     };
     db.updateScan(scanId, { progress: JSON.stringify(progress) });
     emit(scanId, { type: 'progress', progress });
   };
-  const handleLine = (line, isStdout) => {
-    const t = line.trim();
-    if (!t) return;
-    const st = asStats(t);
-    if (st) { emitProgress(st); return; } // drive the bar; keep raw JSON out of the terminal
-    if (isStdout) {
-      const finding = parseNucleiLine(t, scanId, monitor);
-      if (finding) {
-        findings.push(finding);
-        term.push(`[${String(findings.length).padStart(3, '0')}] ${finding.host} [${finding.severity}] ${finding.name}`);
-        return;
-      }
+
+  // ── template + common nuclei args (target added per-run) ──
+  const commonArgs = ['-rl', String(adv.rateLimit || 150), '-timeout', String(adv.timeout || 30), '-j', '-stats', '-si', '5'];
+  if (monitor.templateMode === 'categories' && monitor.templateCategories?.length) {
+    commonArgs.push('-tags', monitor.templateCategories.map(c => TAG_MAP[c] || c).join(','));
+  }
+  if (monitor.templateMode === 'custom' && monitor.customTemplates?.length) {
+    const dir = templatesDir();
+    for (const raw of monitor.customTemplates) {
+      const val = String(raw).trim();
+      if (!val) continue;
+      const rel = /\.ya?ml$/.test(val) ? val : `${val}.yaml`;
+      const full = dir ? path.join(dir, rel) : null;
+      if (full && fs.existsSync(full)) commonArgs.push('-t', full);
+      else commonArgs.push('-id', val.replace(/\.ya?ml$/, ''));
     }
-    term.push(t);
+  }
+  if (adv.userAgent) commonArgs.push('-H', `User-Agent: ${adv.userAgent}`);
+  if (adv.followRedirects === false) commonArgs.push('-no-redirects');
+
+  // ── nuclei phase ──
+  const startNuclei = (targetArgs) => {
+    const args = [...targetArgs, ...commonArgs];
+    term.push(`[INF] nuclei ${args.join(' ')}`);
+
+    let proc;
+    try {
+      proc = spawn('nuclei', args, { shell: false });
+    } catch {
+      if (state.killTimer) clearTimeout(state.killTimer);
+      running.delete(scanId);
+      return runMockScan(scanId, monitor);
+    }
+    state.proc = proc;
+
+    proc.on('error', () => {
+      if (settled) return;
+      settled = true;
+      if (state.killTimer) clearTimeout(state.killTimer);
+      running.delete(scanId);
+      if (state.cancelled) return finalize(scanId, Date.now() - start, 'cancelled', term, findings, monitor);
+      return runMockScan(scanId, monitor);
+    });
+
+    const handleLine = (line, isStdout) => {
+      const t = line.trim();
+      if (!t) return;
+      const st = asStats(t);
+      if (st) { emitProgress(st); return; }
+      if (isStdout) {
+        const finding = parseNucleiLine(t, scanId, monitor);
+        if (finding) {
+          findings.push(finding);
+          term.push(`[${String(findings.length).padStart(3, '0')}] ${finding.host} [${finding.severity}] ${finding.name}`);
+          return;
+        }
+      }
+      term.push(t);
+    };
+
+    let stdoutBuf = '';
+    proc.stdout.on('data', (data) => {
+      started = true;
+      stdoutBuf += data.toString();
+      let nl;
+      while ((nl = stdoutBuf.indexOf('\n')) !== -1) { handleLine(stdoutBuf.slice(0, nl), true); stdoutBuf = stdoutBuf.slice(nl + 1); }
+    });
+    let stderrBuf = '';
+    proc.stderr.on('data', (data) => {
+      stderrBuf += data.toString();
+      let nl;
+      while ((nl = stderrBuf.indexOf('\n')) !== -1) { handleLine(stderrBuf.slice(0, nl), false); stderrBuf = stderrBuf.slice(nl + 1); }
+    });
+
+    proc.on('close', (code) => {
+      if (settled) return;
+      settled = true;
+      if (state.killTimer) clearTimeout(state.killTimer);
+      running.delete(scanId);
+      const duration = Date.now() - start;
+      if (state.cancelled) {
+        term.push(`[INF] Scan cancelled after ${(duration / 1000).toFixed(1)}s`);
+        finalize(scanId, duration, 'cancelled', term, findings, monitor);
+      } else if (state.timedOut) {
+        term.push(`[INF] Stopped by timeout after ${(duration / 1000).toFixed(1)}s (${findings.length} findings kept)`);
+        finalize(scanId, duration, 'failed', term, findings, monitor);
+      } else if (!started && code !== 0) {
+        if (term.lines.some(l => l.includes('no templates provided'))) {
+          term.push('[ERR] The selected templates matched nothing. Pick a category, "All templates", or valid custom templates.');
+        } else {
+          term.push(`[ERR] Nuclei exited with code ${code}`);
+        }
+        finalize(scanId, duration, 'failed', term, findings, monitor);
+      } else {
+        term.push(`[INF] Scan ${code === 0 ? 'completed' : 'finished'} in ${(duration / 1000).toFixed(1)}s (${findings.length} findings)`);
+        finalize(scanId, duration, 'completed', term, findings, monitor);
+      }
+      pump();
+    });
   };
 
-  let stdoutBuf = '';
-  proc.stdout.on('data', (data) => {
-    started = true;
-    stdoutBuf += data.toString();
-    let nl;
-    while ((nl = stdoutBuf.indexOf('\n')) !== -1) {
-      handleLine(stdoutBuf.slice(0, nl), true);
-      stdoutBuf = stdoutBuf.slice(nl + 1);
-    }
-  });
+  // ── crawl phase (opt-in): katana discovers URLs, then nuclei scans them all ──
+  const startCrawl = (cb) => {
+    const depth = Math.max(1, Math.min(5, Number(adv.crawlDepth) || 2));
+    const outFile = path.join(os.tmpdir(), `sentinel-crawl-${scanId}.txt`);
+    const kargs = ['-u', monitor.url, '-d', String(depth), '-silent', '-fs', 'fqdn', '-timeout', String(adv.timeout || 15)];
+    if (adv.userAgent) kargs.push('-H', `User-Agent: ${adv.userAgent}`);
+    term.push(`[INF] Crawling ${monitor.url} (depth ${depth})...`);
 
-  let stderrBuf = '';
-  proc.stderr.on('data', (data) => {
-    stderrBuf += data.toString();
-    let nl;
-    while ((nl = stderrBuf.indexOf('\n')) !== -1) {
-      handleLine(stderrBuf.slice(0, nl), false);
-      stderrBuf = stderrBuf.slice(nl + 1);
+    let proc;
+    try {
+      proc = spawn('katana', kargs, { shell: false });
+    } catch {
+      term.push('[INF] katana not available — scanning base URL only');
+      return cb(['-u', monitor.url]);
     }
-  });
+    state.proc = proc;
 
-  proc.on('close', (code) => {
-    if (settled) return;
-    settled = true;
-    if (state.killTimer) clearTimeout(state.killTimer);
-    running.delete(scanId);
-    const duration = Date.now() - start;
-    if (state.cancelled) {
-      term.push(`[INF] Scan cancelled after ${(duration / 1000).toFixed(1)}s`);
-      finalize(scanId, duration, 'cancelled', term, findings, monitor);
-    } else if (state.timedOut) {
-      term.push(`[INF] Stopped by timeout after ${(duration / 1000).toFixed(1)}s (${findings.length} findings kept)`);
-      finalize(scanId, duration, 'failed', term, findings, monitor);
-    } else if (!started && code !== 0) {
-      // produced no output and failed to start scanning — treat as engine error
-      if (term.lines.some(l => l.includes('no templates provided'))) {
-        term.push('[ERR] The selected templates matched nothing. Pick a category, "All templates", or valid custom templates.');
-      } else {
-        term.push(`[ERR] Nuclei exited with code ${code}`);
+    const urls = new Set([monitor.url]);
+    let buf = '';
+    const tick = setInterval(() => emit(scanId, {
+      type: 'progress',
+      progress: { phase: 'crawl', percent: 0, requests: urls.size, total: 0, rps: 0, matched: 0, errors: 0, duration: '' },
+    }), 1000);
+
+    proc.stdout.on('data', (d) => {
+      buf += d.toString();
+      let nl;
+      while ((nl = buf.indexOf('\n')) !== -1) {
+        const u = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        if (/^https?:\/\//i.test(u) && !urls.has(u)) {
+          urls.add(u);
+          if (urls.size % 25 === 0) term.push(`[INF] Crawled ${urls.size} URLs...`);
+        }
       }
-      finalize(scanId, duration, 'failed', term, findings, monitor);
-    } else {
-      term.push(`[INF] Scan ${code === 0 ? 'completed' : 'finished'} in ${(duration / 1000).toFixed(1)}s (${findings.length} findings)`);
-      finalize(scanId, duration, 'completed', term, findings, monitor);
-    }
-    pump();
-  });
+    });
+    proc.stderr.on('data', () => { /* katana progress noise ignored */ });
+    proc.on('error', () => { clearInterval(tick); term.push('[INF] katana not available — scanning base URL only'); cb(['-u', monitor.url]); });
+    proc.on('close', () => {
+      clearInterval(tick);
+      if (settled) return;
+      if (state.cancelled || state.timedOut) {
+        settled = true;
+        if (state.killTimer) clearTimeout(state.killTimer);
+        running.delete(scanId);
+        term.push(state.cancelled ? '[INF] Cancelled during crawl' : '[INF] Stopped by timeout during crawl');
+        finalize(scanId, Date.now() - start, state.cancelled ? 'cancelled' : 'failed', term, [], monitor);
+        pump();
+        return;
+      }
+      if (urls.size > 1) {
+        try { fs.writeFileSync(outFile, [...urls].join('\n')); term.push(`[INF] Crawl complete: ${urls.size} URLs → scanning all`); return cb(['-l', outFile]); }
+        catch { /* fall through to base url */ }
+      }
+      term.push(`[INF] Crawl found ${urls.size} URL(s) — scanning base URL`);
+      cb(['-u', monitor.url]);
+    });
+  };
+
+  if (adv.crawl) startCrawl(startNuclei);
+  else startNuclei(['-u', monitor.url]);
 }
 
 // ─── Parse one JSONL line from `nuclei -j` into our finding shape ───

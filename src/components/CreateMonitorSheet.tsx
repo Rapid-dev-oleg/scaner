@@ -523,6 +523,32 @@ export default function CreateMonitorSheet() {
                     onCheckedChange={v => setAdvanced(p => ({ ...p, followRedirects: v }))}
                   />
                 </div>
+                {/* Crawl first (katana): scan all discovered URLs, not just the homepage */}
+                <div className="rounded-md border p-3" style={{ backgroundColor: 'var(--bg-tertiary)', borderColor: (advanced as any).crawl ? 'var(--accent-cyan)' : 'var(--border-subtle)' }}>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <Label className="text-[12px] font-medium" style={{ color: 'var(--text-primary)' }}>Crawl site first (katana)</Label>
+                      <p className="text-[11px] mt-0.5" style={{ color: 'var(--text-muted)' }}>Discover all URLs and scan them, not just the homepage. Slower but far deeper.</p>
+                    </div>
+                    <Switch
+                      checked={!!(advanced as any).crawl}
+                      onCheckedChange={v => setAdvanced(p => ({ ...p, crawl: v } as any))}
+                    />
+                  </div>
+                  {(advanced as any).crawl && (
+                    <div className="mt-3 flex items-center gap-2">
+                      <Label className="text-[11px] font-medium" style={{ color: 'var(--text-muted)' }}>Crawl depth</Label>
+                      <Input
+                        type="number" min={1} max={5}
+                        value={(advanced as any).crawlDepth ?? 2}
+                        onChange={e => setAdvanced(p => ({ ...p, crawlDepth: Math.max(1, Math.min(5, Number(e.target.value) || 2)) } as any))}
+                        className="h-8 w-20 text-[12px] focus-ring"
+                        style={{ backgroundColor: 'var(--bg-secondary)', borderColor: 'var(--border-subtle)', color: 'var(--text-primary)' }}
+                      />
+                      <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>1–5 (higher = deeper, slower)</span>
+                    </div>
+                  )}
+                </div>
                 <div className="space-y-1.5">
                   <Label className="text-[11px] font-medium" style={{ color: 'var(--text-muted)' }}>Max Redirects</Label>
                   <Input

@@ -38,7 +38,18 @@ export interface Scan {
   startedAt: string;
   completedAt?: string;
   error?: string;
+  progress?: ScanProgress | string;
   terminalOutput: string | string[];
+}
+
+export interface ScanProgress {
+  percent: number;
+  requests: number;
+  total: number;
+  rps: number;
+  matched: number;
+  errors: number;
+  duration: string;
 }
 
 export interface Monitor {

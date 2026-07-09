@@ -190,29 +190,63 @@ function runNuclei(scanId, monitor) {
     return runMockScan(scanId, monitor);
   });
 
+  // Detect nuclei's -stats JSON line (progress), which appears on stderr/stdout.
+  const asStats = (t) => {
+    if (!t.startsWith('{') || t.indexOf('"percent"') === -1) return null;
+    try {
+      const p = JSON.parse(t);
+      if (p && p.percent !== undefined && p.total !== undefined && p.info === undefined) return p;
+    } catch { /* not json */ }
+    return null;
+  };
+  const emitProgress = (p) => {
+    const progress = {
+      percent: Number(p.percent) || 0,
+      requests: Number(p.requests) || 0,
+      total: Number(p.total) || 0,
+      rps: Number(p.rps) || 0,
+      matched: Number(p.matched) || 0,
+      errors: Number(p.errors) || 0,
+      duration: p.duration || '',
+    };
+    db.updateScan(scanId, { progress: JSON.stringify(progress) });
+    emit(scanId, { type: 'progress', progress });
+  };
+  const handleLine = (line, isStdout) => {
+    const t = line.trim();
+    if (!t) return;
+    const st = asStats(t);
+    if (st) { emitProgress(st); return; } // drive the bar; keep raw JSON out of the terminal
+    if (isStdout) {
+      const finding = parseNucleiLine(t, scanId, monitor);
+      if (finding) {
+        findings.push(finding);
+        term.push(`[${String(findings.length).padStart(3, '0')}] ${finding.host} [${finding.severity}] ${finding.name}`);
+        return;
+      }
+    }
+    term.push(t);
+  };
+
   let stdoutBuf = '';
   proc.stdout.on('data', (data) => {
     started = true;
     stdoutBuf += data.toString();
     let nl;
     while ((nl = stdoutBuf.indexOf('\n')) !== -1) {
-      const line = stdoutBuf.slice(0, nl).trim();
+      handleLine(stdoutBuf.slice(0, nl), true);
       stdoutBuf = stdoutBuf.slice(nl + 1);
-      if (!line) continue;
-      const finding = parseNucleiLine(line, scanId, monitor);
-      if (finding) {
-        findings.push(finding);
-        term.push(`[${String(findings.length).padStart(3, '0')}] ${finding.host} [${finding.severity}] ${finding.name}`);
-      } else {
-        term.push(line);
-      }
     }
   });
 
+  let stderrBuf = '';
   proc.stderr.on('data', (data) => {
-    // nuclei writes its banner, progress and stats to stderr, already tagged
-    // with [INF]/[WRN]/[ERR] — pass them through as-is for the live terminal.
-    data.toString().split('\n').filter(Boolean).forEach(l => term.push(l.trim()));
+    stderrBuf += data.toString();
+    let nl;
+    while ((nl = stderrBuf.indexOf('\n')) !== -1) {
+      handleLine(stderrBuf.slice(0, nl), false);
+      stderrBuf = stderrBuf.slice(nl + 1);
+    }
   });
 
   proc.on('close', (code) => {

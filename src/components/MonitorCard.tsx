@@ -6,6 +6,7 @@ import type { Monitor, Severity } from '@/types';
 import { useApp } from '@/contexts/AppContext';
 import { useMonitors } from '@/contexts/MonitorsContext';
 import { formatDistanceToNow } from 'date-fns';
+import ScanProgressBar from './ScanProgressBar';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -75,8 +76,15 @@ export default function MonitorCard({ monitor }: MonitorCardProps) {
         </span>
       </div>
 
+      {/* Live scan progress */}
+      {isScanning && (
+        <div className="mb-4">
+          <ScanProgressBar scanId={activeScan?.id || ''} initial={activeScan?.progress} showMeta label="Scanning" />
+        </div>
+      )}
+
       {/* Severity Bar */}
-      {totalFindings > 0 && (
+      {!isScanning && totalFindings > 0 && (
         <div className="flex h-1.5 rounded-full overflow-hidden mb-4" style={{ backgroundColor: 'var(--bg-tertiary)' }}>
           {barSegments.map(sev => {
             const pct = (monitor.findingCounts[sev] / totalFindings) * 100;
@@ -97,7 +105,7 @@ export default function MonitorCard({ monitor }: MonitorCardProps) {
       )}
 
       {/* Finding Counts */}
-      {totalFindings > 0 && (
+      {!isScanning && totalFindings > 0 && (
         <div className="flex flex-wrap gap-1.5 mb-4">
           {severities.filter(s => monitor.findingCounts[s] > 0).map(sev => (
             <SeverityBadge key={sev} severity={sev} count={monitor.findingCounts[sev]} />
@@ -105,7 +113,7 @@ export default function MonitorCard({ monitor }: MonitorCardProps) {
         </div>
       )}
 
-      {totalFindings === 0 && (
+      {!isScanning && totalFindings === 0 && (
         <div className="text-[12px] mb-4" style={{ color: 'var(--text-muted)' }}>
           No findings yet
         </div>

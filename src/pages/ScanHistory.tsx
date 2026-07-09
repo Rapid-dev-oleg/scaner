@@ -5,6 +5,7 @@ import SeverityBadge from '@/components/SeverityBadge';
 import { useMonitors } from '@/contexts/MonitorsContext';
 import { useApp } from '@/contexts/AppContext';
 import { api } from '@/api';
+import ScanProgressBar, { parseProgress } from '@/components/ScanProgressBar';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { format, subDays } from 'date-fns';
@@ -158,7 +159,9 @@ export default function ScanHistory() {
                 <span className="text-[12px]" style={{ color: 'var(--text-muted)' }}>{format(new Date(scan.startedAt || scan.queuedAt || Date.now()), 'MMM dd, HH:mm')}</span>
                 <span className="text-[12px] font-mono truncate" style={{ color: 'var(--text-primary)' }} title={scan.target}>{scan.target}</span>
                 <span className="text-[12px] truncate" style={{ color: 'var(--text-secondary)' }}>{scan.templates}</span>
-                <span className="text-[12px]" style={{ color: 'var(--text-secondary)' }}>{isActive ? '—' : formatDuration(scan.duration)}</span>
+                <span className="text-[12px]" style={{ color: isActive ? 'var(--accent-cyan)' : 'var(--text-secondary)' }}>
+                  {isActive ? (parseProgress(scan.progress) ? `${parseProgress(scan.progress)!.percent}%` : '—') : formatDuration(scan.duration)}
+                </span>
                 <div className="flex flex-wrap gap-1">
                   {severityOrder.filter(s => findingCounts[s] > 0).map(sev => <SeverityBadge key={sev} severity={sev} count={findingCounts[sev]} />)}
                   {(!scan.findings || scan.findings.length === 0) && <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>None</span>}
@@ -211,6 +214,11 @@ export default function ScanHistory() {
                       <span className="text-[11px] px-1.5 py-0.5 rounded" style={{ backgroundColor: 'var(--bg-tertiary)', color: 'var(--text-secondary)' }}>{selectedScan.templates}</span>
                       <span className="text-[11px] px-1.5 py-0.5 rounded font-medium" style={{ backgroundColor: 'rgba(0,212,170,0.1)', color: 'var(--accent-cyan)' }}>{selectedFindings.length} findings</span>
                     </div>
+                    {(selectedScan.status === 'running' || selectedScan.status === 'queued') && (
+                      <div className="mt-3 max-w-[420px]">
+                        <ScanProgressBar scanId={selectedScan.id} initial={selectedScan.progress} live showMeta />
+                      </div>
+                    )}
                   </div>
                   <div className="flex items-center gap-2 flex-shrink-0">
                     <button onClick={shareReport} disabled={sharing} title="Copy public report link"

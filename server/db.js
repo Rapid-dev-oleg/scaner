@@ -50,7 +50,8 @@ sqlite.exec(`
     completedAt TEXT,
     terminalOutput TEXT DEFAULT '',
     error TEXT,
-    shareToken TEXT
+    shareToken TEXT,
+    progress TEXT
   );
 
   CREATE TABLE IF NOT EXISTS findings (
@@ -96,6 +97,9 @@ sqlite.exec(`
 const scanColumns = sqlite.prepare('PRAGMA table_info(scans)').all().map(c => c.name);
 if (!scanColumns.includes('shareToken')) {
   sqlite.exec('ALTER TABLE scans ADD COLUMN shareToken TEXT');
+}
+if (!scanColumns.includes('progress')) {
+  sqlite.exec('ALTER TABLE scans ADD COLUMN progress TEXT');
 }
 sqlite.exec('CREATE INDEX IF NOT EXISTS idx_scans_token ON scans(shareToken)');
 

@@ -26,3 +26,4 @@ server/data
 .DS_Store
 .vscode
 .idea
+nuclei-templates

@@ -123,6 +123,7 @@ function makeTerminal(scanId, initial = []) {
   const lines = [...initial];
   let saveTimer = null;
   const flush = () => { db.updateScan(scanId, { terminalOutput: lines.join('\n') }); };
+  if (initial.length) flush(); // persist the starting lines immediately
   return {
     lines,
     push(line) {
@@ -137,8 +138,10 @@ function makeTerminal(scanId, initial = []) {
 // ─── Nuclei runner (falls back to a mock scan if the CLI is absent) ───
 function runNuclei(scanId, monitor) {
   const adv = monitor.advanced || {};
+  // No -silent: we want nuclei's progress/info on stderr so it streams live.
+  // -stats + -si prints a periodic progress line so the terminal never looks dead.
   const args = ['-u', monitor.url, '-rl', String(adv.rateLimit || 150),
-    '-timeout', String(adv.timeout || 30), '-j', '-silent'];
+    '-timeout', String(adv.timeout || 30), '-j', '-stats', '-si', '5'];
 
   if (monitor.templateMode === 'categories' && monitor.templateCategories?.length) {
     const tags = monitor.templateCategories.map(c => TAG_MAP[c] || c).join(',');
@@ -200,7 +203,9 @@ function runNuclei(scanId, monitor) {
   });
 
   proc.stderr.on('data', (data) => {
-    data.toString().split('\n').filter(Boolean).forEach(l => term.push(`[ERR] ${l.trim()}`));
+    // nuclei writes its banner, progress and stats to stderr, already tagged
+    // with [INF]/[WRN]/[ERR] — pass them through as-is for the live terminal.
+    data.toString().split('\n').filter(Boolean).forEach(l => term.push(l.trim()));
   });
 
   proc.on('close', (code) => {

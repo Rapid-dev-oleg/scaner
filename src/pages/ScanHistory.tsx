@@ -162,10 +162,10 @@ export default function ScanHistory() {
 
       {/* Report Modal */}
       <Dialog open={!!selectedScan} onOpenChange={() => setSelectedScan(null)}>
-        <DialogContent className="max-w-[820px] max-h-[85vh] p-0 overflow-hidden border" style={{ backgroundColor: 'var(--bg-secondary)', borderColor: 'var(--border-subtle)' }}>
+        <DialogContent className="max-w-[820px] max-h-[85vh] p-0 overflow-hidden border flex flex-col gap-0" style={{ backgroundColor: 'var(--bg-secondary)', borderColor: 'var(--border-subtle)' }}>
           {selectedScan && (
             <>
-              <DialogHeader className="px-6 py-4 border-b" style={{ borderColor: 'var(--border-subtle)' }}>
+              <DialogHeader className="px-6 py-4 border-b shrink-0" style={{ borderColor: 'var(--border-subtle)' }}>
                 <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0">
                     <DialogTitle className="text-[15px] font-mono font-semibold truncate" style={{ color: 'var(--text-primary)' }}>{selectedScan.target}</DialogTitle>
@@ -186,13 +186,13 @@ export default function ScanHistory() {
                 </div>
               </DialogHeader>
 
-              <Tabs defaultValue="findings" className="flex flex-col flex-1 overflow-hidden">
+              <Tabs defaultValue="findings" className="flex flex-col flex-1 min-h-0 overflow-hidden">
                 <TabsList className="mx-6 mt-4 h-8 w-auto self-start" style={{ backgroundColor: 'var(--bg-tertiary)' }}>
                   <TabsTrigger value="findings" className="text-[12px] h-6 px-3">Findings ({selectedFindings.length})</TabsTrigger>
                   <TabsTrigger value="terminal" className="text-[12px] h-6 px-3">Terminal Output</TabsTrigger>
                 </TabsList>
 
-                <TabsContent value="findings" className="flex-1 overflow-y-auto sentinel-scrollbar px-6 py-4 m-0">
+                <TabsContent value="findings" className="flex-1 min-h-0 overflow-y-auto sentinel-scrollbar px-6 py-4 m-0">
                   {selectedFindings.length > 0 ? (
                     <div className="space-y-3">
                       {selectedFindings.map((finding, idx) => <FindingCard key={finding.id} finding={finding} index={idx} />)}
@@ -208,7 +208,7 @@ export default function ScanHistory() {
                   )}
                 </TabsContent>
 
-                <TabsContent value="terminal" className="flex-1 overflow-hidden m-0">
+                <TabsContent value="terminal" className="flex-1 min-h-0 overflow-hidden m-0">
                   <TerminalView scan={selectedScan} />
                 </TabsContent>
               </Tabs>

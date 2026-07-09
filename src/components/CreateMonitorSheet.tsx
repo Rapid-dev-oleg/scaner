@@ -301,10 +301,10 @@ export default function CreateMonitorSheet() {
                 {selectedTemplates.length > 0 && (
                   <div className="flex flex-wrap gap-1.5">
                     {selectedTemplates.map(t => (
-                      <button key={t} onClick={() => toggleTemplate(t)}
+                      <button key={t} onClick={() => toggleTemplate(t)} title={t}
                         className="flex items-center gap-1 text-[11px] font-mono px-2 py-1 rounded focus-ring"
                         style={{ backgroundColor: 'rgba(0,212,170,0.1)', color: 'var(--accent-cyan)' }}>
-                        {t} <X size={10} />
+                        {t.split('/').pop()?.replace(/\.ya?ml$/, '')} <X size={10} />
                       </button>
                     ))}
                   </div>
@@ -328,9 +328,9 @@ export default function CreateMonitorSheet() {
                   <div className="max-h-[200px] overflow-y-auto rounded-md border space-y-0.5 p-1 sentinel-scrollbar"
                     style={{ backgroundColor: 'var(--bg-tertiary)', borderColor: 'var(--border-subtle)' }}>
                     {tplResults.map(t => {
-                      const checked = selectedTemplates.includes(t.id);
+                      const checked = selectedTemplates.includes(t.path);
                       return (
-                        <button key={t.path} onClick={() => toggleTemplate(t.id)}
+                        <button key={t.path} onClick={() => toggleTemplate(t.path)} title={t.path}
                           className="w-full flex items-center gap-2 h-7 px-2 rounded text-[12px] font-mono transition-colors text-left focus-ring"
                           style={{ backgroundColor: checked ? 'rgba(0,212,170,0.08)' : 'transparent', color: checked ? 'var(--accent-cyan)' : 'var(--text-secondary)' }}>
                           <span className="w-3.5 h-3.5 rounded border flex items-center justify-center flex-shrink-0"

@@ -3,8 +3,11 @@
 const { spawn } = require('child_process');
 const { EventEmitter } = require('events');
 const crypto = require('crypto');
+const path = require('path');
+const fs = require('fs');
 const db = require('./db');
 const { sendNotifications } = require('./notifications');
+const { templatesDir } = require('./templates');
 
 function reportUrlFor(token) {
   const base = (process.env.PUBLIC_BASE_URL || '').replace(/\/+$/, '');
@@ -155,7 +158,16 @@ function runNuclei(scanId, monitor) {
     args.push('-tags', tags);
   }
   if (monitor.templateMode === 'custom' && monitor.customTemplates?.length) {
-    monitor.customTemplates.forEach(t => args.push('-id', t));
+    const dir = templatesDir();
+    for (const raw of monitor.customTemplates) {
+      const val = String(raw).trim();
+      if (!val) continue;
+      // Prefer an exact template file path (-t); fall back to id match (-id).
+      const rel = /\.ya?ml$/.test(val) ? val : `${val}.yaml`;
+      const full = dir ? path.join(dir, rel) : null;
+      if (full && fs.existsSync(full)) args.push('-t', full);
+      else args.push('-id', val.replace(/\.ya?ml$/, ''));
+    }
   }
   if (adv.userAgent) args.push('-H', `User-Agent: ${adv.userAgent}`);
   if (adv.followRedirects === false) args.push('-no-redirects');
@@ -199,14 +211,20 @@ function runNuclei(scanId, monitor) {
     } catch { /* not json */ }
     return null;
   };
+  const clampNum = (v, max) => {
+    const n = Number(v);
+    return Number.isFinite(n) && n >= 0 && n <= max ? n : 0;
+  };
   const emitProgress = (p) => {
+    const total = clampNum(p.total, 1e9);
     const progress = {
-      percent: Number(p.percent) || 0,
-      requests: Number(p.requests) || 0,
-      total: Number(p.total) || 0,
-      rps: Number(p.rps) || 0,
-      matched: Number(p.matched) || 0,
-      errors: Number(p.errors) || 0,
+      // nuclei emits a garbage percent/rps when total is 0 (int64 overflow) — clamp it
+      percent: total > 0 ? clampNum(p.percent, 100) : 0,
+      requests: clampNum(p.requests, 1e9),
+      total,
+      rps: clampNum(p.rps, 1e6),
+      matched: clampNum(p.matched, 1e9),
+      errors: clampNum(p.errors, 1e9),
       duration: p.duration || '',
     };
     db.updateScan(scanId, { progress: JSON.stringify(progress) });
@@ -259,7 +277,11 @@ function runNuclei(scanId, monitor) {
       finalize(scanId, duration, 'cancelled', term, findings, monitor);
     } else if (!started && code !== 0) {
       // produced no output and failed to start scanning — treat as engine error
-      term.push(`[ERR] Nuclei exited with code ${code}`);
+      if (term.lines.some(l => l.includes('no templates provided'))) {
+        term.push('[ERR] The selected templates matched nothing. Pick a category, "All templates", or valid custom templates.');
+      } else {
+        term.push(`[ERR] Nuclei exited with code ${code}`);
+      }
       finalize(scanId, duration, 'failed', term, findings, monitor);
     } else {
       term.push(`[INF] Scan ${code === 0 ? 'completed' : 'finished'} in ${(duration / 1000).toFixed(1)}s (${findings.length} findings)`);

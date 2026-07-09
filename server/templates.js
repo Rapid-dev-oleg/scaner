@@ -80,7 +80,8 @@ function searchTemplates(query, limit = 50) {
     for (const e of entries) {
       if (results.length >= limit) break;
       const full = path.join(cur, e.name);
-      if (e.isDirectory()) { if (!e.name.startsWith('.')) stack.push(full); }
+      // workflows/ aren't individual templates and can't be run via -id/-t here
+      if (e.isDirectory()) { if (!e.name.startsWith('.') && e.name !== 'workflows') stack.push(full); }
       else if (e.name.endsWith('.yaml') || e.name.endsWith('.yml')) {
         const id = e.name.replace(/\.ya?ml$/, '');
         const rel = path.relative(base, full);
@@ -117,4 +118,4 @@ function updateTemplates() {
   });
 }
 
-module.exports = { getCategories, searchTemplates, updateTemplates };
+module.exports = { getCategories, searchTemplates, updateTemplates, templatesDir };

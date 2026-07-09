@@ -1,0 +1,28 @@
+# Never copy host-built artifacts into the image — deps are installed inside.
+node_modules
+**/node_modules
+dist
+dist-ssr
+
+# Local data / DB
+data
+server/data
+*.db
+*.sqlite
+*.sqlite3
+
+# VCS & tooling
+.git
+.gitignore
+.github
+
+# Env & secrets
+.env
+.env.*
+!.env.example
+
+# Logs & OS cruft
+*.log
+.DS_Store
+.vscode
+.idea

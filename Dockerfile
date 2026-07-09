@@ -30,24 +30,25 @@ COPY . .
 RUN npm run build
 
 # --- Stage 3: Production Runtime ---
-FROM node:20-alpine AS runtime
+# Debian slim (glibc) so better-sqlite3's prebuilt native binary works without
+# a compile toolchain. (Alpine/musl needs a full glibc/musl source build and
+# was hitting "fcntl64: symbol not found".)
+FROM node:20-bookworm-slim AS runtime
 WORKDIR /app
 
-RUN apk add --no-cache ca-certificates
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates wget \
+    && rm -rf /var/lib/apt/lists/*
 
-# Copy Nuclei binary + templates
+# Copy Nuclei binary + templates (nuclei is a static Go binary — runs on Debian)
 COPY --from=nuclei-builder /usr/local/bin/nuclei /usr/local/bin/nuclei
 COPY --from=nuclei-builder /root/nuclei-templates /root/nuclei-templates
 
 # Copy built frontend
 COPY --from=frontend-builder /app/dist ./dist
 
-# Copy server (CommonJS). better-sqlite3 is a native module — build it from
-# source (no musl prebuilds), then drop the toolchain to keep the image small.
+# Copy server (CommonJS). On glibc, better-sqlite3 installs a prebuilt binary.
 COPY server/ ./server/
-RUN apk add --no-cache --virtual .build-deps python3 make g++ \
-    && cd server && npm install --build-from-source \
-    && apk del .build-deps
+RUN cd server && npm install --omit=dev
 
 ENV NODE_ENV=production
 ENV PORT=3001

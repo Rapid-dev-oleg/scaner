@@ -46,9 +46,11 @@ COPY --from=nuclei-builder /root/nuclei-templates /root/nuclei-templates
 # Copy built frontend
 COPY --from=frontend-builder /app/dist ./dist
 
-# Copy server (CommonJS). On glibc, better-sqlite3 installs a prebuilt binary.
+# Copy server (CommonJS). better-sqlite3 downloads a prebuilt binary; that
+# download can time out, so retry a few times before giving up (the Debian slim
+# image has no compiler, so we must get the prebuilt artifact).
 COPY server/ ./server/
-RUN cd server && npm install --omit=dev
+RUN cd server && (npm install --omit=dev || npm install --omit=dev || npm install --omit=dev)
 
 ENV NODE_ENV=production
 ENV PORT=3001

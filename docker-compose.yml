@@ -28,6 +28,8 @@ services:
       - DATA_DIR=/data
       # Set AUTH_PASSWORD to require a login. Leave empty/unset to run open.
       - AUTH_PASSWORD=${AUTH_PASSWORD:-}
+      # Public base URL (e.g. your ngrok domain) — used to build report links in notifications.
+      - PUBLIC_BASE_URL=${PUBLIC_BASE_URL:-}
       - NUCLEI_TEMPLATES=/root/nuclei-templates
       - SMTP_HOST=${SMTP_HOST:-}
       - SMTP_PORT=${SMTP_PORT:-587}

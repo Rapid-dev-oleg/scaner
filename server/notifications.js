@@ -19,9 +19,11 @@ function buildSummary(findings) {
   return `Scan complete: ${findings.length} findings (${parts.join(', ')})`;
 }
 
-async function sendEmail(config, summary, findings, reportUrl) {
-  const address = config.address || process.env.EMAIL_ADDRESS;
-  if (!address) return;
+async function sendEmail(dest, summary, findings, reportUrl) {
+  let recipients = Array.isArray(dest.recipients) ? dest.recipients.map(s => String(s).trim()).filter(Boolean) : [];
+  if (!recipients.length && dest.address) recipients = [dest.address];
+  if (!recipients.length && process.env.EMAIL_ADDRESS) recipients = [process.env.EMAIL_ADDRESS];
+  if (!recipients.length) return;
 
   const host = process.env.SMTP_HOST;
   const port = parseInt(process.env.SMTP_PORT || '587', 10);
@@ -47,7 +49,7 @@ async function sendEmail(config, summary, findings, reportUrl) {
   const linkText = reportUrl ? `\n\nView full report: ${reportUrl}` : '';
   await transporter.sendMail({
     from,
-    to: address,
+    to: recipients.join(', '),
     subject: `Sentinel: ${summary}`,
     text: `${summary}\n\n${findingLines || 'No findings'}${linkText}`,
   });
@@ -139,38 +141,59 @@ async function sendWebhook(config, summary, findings, reportUrl) {
   });
 }
 
+// Normalize a monitor's per-channel notification config. Accepts the legacy
+// { email: 'all', slack: 'high', ... } shape and the richer per-channel shape
+// { email: { enabled, level, recipients }, telegram: { enabled, level, chatId }, ... }.
+function normalizeChannel(value) {
+  if (value == null) return null;
+  if (typeof value === 'string') return { enabled: value !== 'never', level: value };
+  return { enabled: value.enabled !== false, level: value.level || 'all', ...value };
+}
+
+// Per-monitor destination, falling back to the global channel config, then env.
+function resolveDest(type, m, g) {
+  m = m || {}; g = g || {};
+  switch (type) {
+    case 'email': {
+      const recipients = (Array.isArray(m.recipients) ? m.recipients : [])
+        .map(s => String(s).trim()).filter(Boolean);
+      if (!recipients.length && g.address) recipients.push(g.address);
+      return { recipients };
+    }
+    case 'telegram': return { botToken: m.botToken || g.botToken, chatId: m.chatId || g.chatId };
+    case 'slack': return { webhook: m.webhook || g.webhook, channel: m.channel || g.channel };
+    case 'discord': return { webhook: m.webhook || g.webhook, username: m.username || g.username };
+    case 'webhook': return { url: m.url || g.url, method: m.method || g.method };
+    default: return {};
+  }
+}
+
 async function sendNotifications(findings, monitor, reportUrl) {
   const db = require('./db');
-  const channels = db.channels().filter(c => c.enabled);
-  if (channels.length === 0) return;
+  const notif = monitor.notifications || {};
+  const globalByType = {};
+  for (const ch of db.channels()) globalByType[ch.type] = ch.config || {};
 
   const summary = buildSummary(findings);
+  const hasHigh = findings.some(f => ['high', 'critical'].includes(f.severity));
 
-  for (const channel of channels) {
+  for (const type of ['email', 'slack', 'telegram', 'discord', 'webhook']) {
+    const cfg = normalizeChannel(notif[type]);
+    if (!cfg || !cfg.enabled || cfg.level === 'never') continue;
+    if (cfg.level === 'high' && !hasHigh) continue;
+
+    const dest = resolveDest(type, cfg, globalByType[type]);
     try {
-      const config = channel.config || {};
-      switch (channel.type) {
-        case 'email':
-          await sendEmail(config, summary, findings, reportUrl);
-          break;
-        case 'slack':
-          await sendSlack(config, summary, findings, reportUrl);
-          break;
-        case 'telegram':
-          await sendTelegram(config, summary, reportUrl);
-          break;
-        case 'discord':
-          await sendDiscord(config, summary, findings, reportUrl);
-          break;
-        case 'webhook':
-          await sendWebhook(config, summary, findings, reportUrl);
-          break;
-        default:
-          console.log(`[Notifier] Unknown channel type: ${channel.type}`);
+      switch (type) {
+        case 'email': await sendEmail(dest, summary, findings, reportUrl); break;
+        case 'slack': await sendSlack(dest, summary, findings, reportUrl); break;
+        case 'telegram': await sendTelegram(dest, summary, reportUrl); break;
+        case 'discord': await sendDiscord(dest, summary, findings, reportUrl); break;
+        case 'webhook': await sendWebhook(dest, summary, findings, reportUrl); break;
       }
-      console.log(`[Notifier] ${channel.type} sent successfully`);
+      console.log(`[Notifier] ${type} sent for ${monitor.url}`);
     } catch (err) {
-      console.error(`[Notifier] ${channel.type} failed:`, err.message || err);
+      console.error(`[Notifier] ${type} failed:`, err.message || err);
     }
   }
 }

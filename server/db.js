@@ -248,6 +248,7 @@ if (Object.keys(db.settings()).length === 0) {
     defaultTimeout: 30,
     defaultSeverityThreshold: 'low',
     concurrentScansLimit: 5,
+    scanTimeoutMinutes: 30,
     templatesPath: '~/.nuclei-templates',
   });
 }

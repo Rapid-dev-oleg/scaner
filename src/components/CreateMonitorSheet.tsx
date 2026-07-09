@@ -9,7 +9,7 @@ import { useMonitors } from '@/contexts/MonitorsContext';
 import { api } from '@/api';
 import { TEMPLATE_CATEGORIES, type TemplateCategory } from '@/data/templates';
 import { shieldAlert, settings, layout, globe, lock, cpu, eye } from '@/utils/icons';
-import type { TemplateMode, ScheduleType, NotificationLevel } from '@/types';
+import type { TemplateMode, ScheduleType } from '@/types';
 
 const CATEGORY_ICONS: Record<string, React.ReactNode> = {
   cve: shieldAlert(14),
@@ -38,6 +38,38 @@ const DEFAULT_ADVANCED = {
   maxRedirects: 10,
 };
 
+// Per-monitor notification channels ("one monitor = one client").
+const NOTIF_CHANNELS: { key: string; label: string }[] = [
+  { key: 'email', label: 'Email' },
+  { key: 'telegram', label: 'Telegram' },
+  { key: 'slack', label: 'Slack' },
+  { key: 'discord', label: 'Discord' },
+  { key: 'webhook', label: 'Webhook' },
+];
+
+function defaultNotifs(): Record<string, any> {
+  return {
+    email: { enabled: false, level: 'all', recipients: [] },
+    telegram: { enabled: false, level: 'high', chatId: '', botToken: '' },
+    slack: { enabled: false, level: 'high', webhook: '' },
+    discord: { enabled: false, level: 'high', webhook: '' },
+    webhook: { enabled: false, level: 'high', url: '', method: 'POST' },
+  };
+}
+
+// Accept the legacy { email:'all', ... } shape or the rich per-channel shape.
+function normalizeNotifs(raw: any): Record<string, any> {
+  const base = defaultNotifs();
+  if (!raw || typeof raw !== 'object') return base;
+  for (const key of Object.keys(base)) {
+    const v = raw[key];
+    if (v == null) continue;
+    if (typeof v === 'string') base[key] = { ...base[key], enabled: v !== 'never', level: v };
+    else base[key] = { ...base[key], ...v, enabled: v.enabled !== false };
+  }
+  return base;
+}
+
 export default function CreateMonitorSheet() {
   const { isCreateSheetOpen, closeSheet, editingMonitorId } = useApp();
   const { monitors, createMonitor, updateMonitor } = useMonitors();
@@ -51,9 +83,7 @@ export default function CreateMonitorSheet() {
   const [selectedTemplates, setSelectedTemplates] = useState<string[]>([]);
   const [schedule, setSchedule] = useState<ScheduleType>('daily');
   const [cronExpr, setCronExpr] = useState('');
-  const [notifications, setNotifications] = useState<Record<string, NotificationLevel>>({
-    email: 'all', slack: 'high', telegram: 'never', discord: 'never', webhook: 'high',
-  });
+  const [notifications, setNotifications] = useState<Record<string, any>>(() => defaultNotifs());
   const [advanced, setAdvanced] = useState(DEFAULT_ADVANCED);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -98,7 +128,7 @@ export default function CreateMonitorSheet() {
       setSelectedTemplates(current.customTemplates || []);
       setSchedule(current.schedule);
       setCronExpr(current.cronExpression || '');
-      setNotifications(current.notifications || { email: 'all', slack: 'high', telegram: 'never', discord: 'never', webhook: 'high' });
+      setNotifications(normalizeNotifs(current.notifications));
       setAdvanced(current.advanced || DEFAULT_ADVANCED);
     } else {
       setUrl('');
@@ -108,7 +138,7 @@ export default function CreateMonitorSheet() {
       setSelectedTemplates([]);
       setSchedule('daily');
       setCronExpr('');
-      setNotifications({ email: 'all', slack: 'high', telegram: 'never', discord: 'never', webhook: 'high' });
+      setNotifications(defaultNotifs());
       setAdvanced(DEFAULT_ADVANCED);
     }
     setErrors({});
@@ -385,28 +415,62 @@ export default function CreateMonitorSheet() {
             )}
           </section>
 
-          {/* Notifications */}
-          <section className="space-y-4">
+          {/* Notifications — per-monitor channels & recipients */}
+          <section className="space-y-3">
             <h3 className="text-[12px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Notifications</h3>
-            <div className="space-y-2">
-              {Object.entries(notifications).map(([channel, level]) => (
-                <div key={channel} className="flex items-center justify-between">
-                  <span className="text-[13px] capitalize" style={{ color: 'var(--text-primary)' }}>{channel}</span>
-                  <div className="flex items-center gap-2">
-                    <select
-                      value={level}
-                      onChange={e => setNotifications(prev => ({ ...prev, [channel]: e.target.value as NotificationLevel }))}
-                      className="h-7 px-2 rounded-md text-[12px] focus-ring cursor-pointer"
-                      style={{ backgroundColor: 'var(--bg-tertiary)', borderColor: 'var(--border-subtle)', color: 'var(--text-secondary)' }}
-                    >
-                      <option value="all">All findings</option>
-                      <option value="high">High+ only</option>
-                      <option value="never">Disabled</option>
-                    </select>
+            <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+              Recipients for this monitor. Server credentials (SMTP, bot token) come from the global settings; here you set who gets alerts.
+            </p>
+            {NOTIF_CHANNELS.map(({ key, label }) => {
+              const cfg = notifications[key] || {};
+              const setNotif = (patch: any) => setNotifications(prev => ({ ...prev, [key]: { ...prev[key], ...patch } }));
+              return (
+                <div key={key} className="rounded-md border p-3" style={{ backgroundColor: 'var(--bg-tertiary)', borderColor: cfg.enabled ? 'var(--accent-cyan)' : 'var(--border-subtle)' }}>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[13px] font-medium" style={{ color: 'var(--text-primary)' }}>{label}</span>
+                    <div className="flex items-center gap-2">
+                      {cfg.enabled && (
+                        <select
+                          value={cfg.level || 'all'}
+                          onChange={e => setNotif({ level: e.target.value })}
+                          className="h-7 px-2 rounded-md text-[11px] focus-ring cursor-pointer"
+                          style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-subtle)', color: 'var(--text-secondary)' }}
+                        >
+                          <option value="all">All findings</option>
+                          <option value="high">High+ only</option>
+                        </select>
+                      )}
+                      <Switch checked={!!cfg.enabled} onCheckedChange={v => setNotif({ enabled: v })} />
+                    </div>
                   </div>
+                  {cfg.enabled && (
+                    <div className="mt-3 space-y-2">
+                      {key === 'email' && <RecipientsEditor value={cfg.recipients || []} onChange={r => setNotif({ recipients: r })} />}
+                      {key === 'telegram' && (
+                        <div className="grid grid-cols-2 gap-2">
+                          <NotifInput placeholder="Chat ID *" value={cfg.chatId || ''} onChange={v => setNotif({ chatId: v })} />
+                          <NotifInput placeholder="Bot token (optional)" value={cfg.botToken || ''} onChange={v => setNotif({ botToken: v })} />
+                        </div>
+                      )}
+                      {(key === 'slack' || key === 'discord') && (
+                        <NotifInput placeholder="Webhook URL *" value={cfg.webhook || ''} onChange={v => setNotif({ webhook: v })} />
+                      )}
+                      {key === 'webhook' && (
+                        <div className="grid grid-cols-[1fr_90px] gap-2">
+                          <NotifInput placeholder="URL *" value={cfg.url || ''} onChange={v => setNotif({ url: v })} />
+                          <select value={cfg.method || 'POST'} onChange={e => setNotif({ method: e.target.value })}
+                            className="h-8 px-2 rounded-md text-[12px] focus-ring cursor-pointer"
+                            style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }}>
+                            <option value="POST">POST</option>
+                            <option value="GET">GET</option>
+                          </select>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
-              ))}
-            </div>
+              );
+            })}
           </section>
 
           {/* Advanced */}
@@ -499,5 +563,57 @@ export default function CreateMonitorSheet() {
         </div>
       </div>
     </>
+  );
+}
+
+function NotifInput({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder: string }) {
+  return (
+    <input
+      value={value}
+      onChange={e => onChange(e.target.value)}
+      placeholder={placeholder}
+      className="w-full h-8 px-3 rounded-md text-[12px] font-mono focus-ring outline-none"
+      style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }}
+    />
+  );
+}
+
+function RecipientsEditor({ value, onChange }: { value: string[]; onChange: (r: string[]) => void }) {
+  const [input, setInput] = useState('');
+  const add = () => {
+    const v = input.trim();
+    if (v && !value.includes(v)) onChange([...value, v]);
+    setInput('');
+  };
+  return (
+    <div className="space-y-2">
+      {value.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {value.map(r => (
+            <button key={r} onClick={() => onChange(value.filter(x => x !== r))}
+              className="flex items-center gap-1 text-[11px] font-mono px-2 py-1 rounded focus-ring"
+              style={{ backgroundColor: 'rgba(0,212,170,0.1)', color: 'var(--accent-cyan)' }}>
+              {r} <X size={10} />
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="flex gap-2">
+        <input
+          type="email"
+          value={input}
+          onChange={e => setInput(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); add(); } }}
+          placeholder="owner@example.com — Enter to add"
+          className="flex-1 h-8 px-3 rounded-md text-[12px] font-mono focus-ring outline-none"
+          style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }}
+        />
+        <button onClick={add} type="button"
+          className="h-8 px-3 rounded-md text-[12px] font-medium border focus-ring"
+          style={{ backgroundColor: 'var(--bg-secondary)', borderColor: 'var(--border-subtle)', color: 'var(--text-secondary)' }}>
+          Add
+        </button>
+      </div>
+    </div>
   );
 }

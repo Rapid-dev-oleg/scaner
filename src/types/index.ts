@@ -92,6 +92,7 @@ export interface AppSettings {
   defaultTimeout: number;
   defaultSeverityThreshold: Severity;
   concurrentScansLimit: number;
+  scanTimeoutMinutes: number;
   templatesPath: string;
 }
 

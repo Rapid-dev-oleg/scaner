@@ -10,6 +10,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   defaultTimeout: 30,
   defaultSeverityThreshold: 'low',
   concurrentScansLimit: 5,
+  scanTimeoutMinutes: 30,
   templatesPath: '~/.nuclei-templates',
 };
 
@@ -37,6 +38,7 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
             defaultRateLimit: Number(data.defaultRateLimit) || 150,
             defaultTimeout: Number(data.defaultTimeout) || 30,
             concurrentScansLimit: Number(data.concurrentScansLimit) || 5,
+            scanTimeoutMinutes: Number(data.scanTimeoutMinutes) || 30,
           });
         }
       })

@@ -180,7 +180,7 @@ function runNuclei(scanId, monitor) {
   const findings = [];
   let started = false;
 
-  const state = { proc: null, cancelled: false };
+  const state = { proc: null, cancelled: false, timedOut: false, killTimer: null };
   running.set(scanId, state);
   let settled = false; // guards against 'error' and 'close' both finalizing
 
@@ -192,6 +192,16 @@ function runNuclei(scanId, monitor) {
     return runMockScan(scanId, monitor);
   }
   state.proc = proc;
+
+  // Global per-scan timeout so a heavy "All templates" run can't hang forever.
+  const timeoutMin = Number(db.settings().scanTimeoutMinutes);
+  if (Number.isFinite(timeoutMin) && timeoutMin > 0) {
+    state.killTimer = setTimeout(() => {
+      state.timedOut = true;
+      term.push(`[ERR] Scan timed out after ${timeoutMin} min — stopping nuclei`);
+      try { proc.kill('SIGKILL'); } catch { /* ignore */ }
+    }, timeoutMin * 60000);
+  }
 
   proc.on('error', () => {
     // spawn failed (nuclei not installed) → fall back to mock, unless cancelled
@@ -270,11 +280,15 @@ function runNuclei(scanId, monitor) {
   proc.on('close', (code) => {
     if (settled) return;
     settled = true;
+    if (state.killTimer) clearTimeout(state.killTimer);
     running.delete(scanId);
     const duration = Date.now() - start;
     if (state.cancelled) {
       term.push(`[INF] Scan cancelled after ${(duration / 1000).toFixed(1)}s`);
       finalize(scanId, duration, 'cancelled', term, findings, monitor);
+    } else if (state.timedOut) {
+      term.push(`[INF] Stopped by timeout after ${(duration / 1000).toFixed(1)}s (${findings.length} findings kept)`);
+      finalize(scanId, duration, 'failed', term, findings, monitor);
     } else if (!started && code !== 0) {
       // produced no output and failed to start scanning — treat as engine error
       if (term.lines.some(l => l.includes('no templates provided'))) {

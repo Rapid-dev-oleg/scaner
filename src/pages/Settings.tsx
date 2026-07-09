@@ -183,6 +183,16 @@ export default function Settings() {
                 style={{ backgroundColor: 'var(--bg-tertiary)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }}
               />
             </div>
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-medium" style={{ color: 'var(--text-muted)' }}>Scan Timeout (min, 0 = none)</label>
+              <input
+                type="number"
+                value={settings.scanTimeoutMinutes}
+                onChange={e => updateSettings({ scanTimeoutMinutes: Number(e.target.value) })}
+                className="w-full h-8 px-3 rounded-md text-[12px] focus-ring outline-none"
+                style={{ backgroundColor: 'var(--bg-tertiary)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }}
+              />
+            </div>
           </div>
         </Section>
 

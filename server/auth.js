@@ -43,6 +43,8 @@ const PUBLIC = new Set(['/api/health', '/api/auth/login', '/api/auth/status']);
 function middleware(req, res, next) {
   if (!enabled) return next();
   if (req.method === 'OPTIONS') return next();
+  // Only guard the API — the frontend (HTML/JS/CSS + login screen) is public.
+  if (!req.path.startsWith('/api')) return next();
   if (PUBLIC.has(req.path)) return next();
   if (isValid(bearer(req))) return next();
   return res.status(401).json({ error: 'Unauthorized' });

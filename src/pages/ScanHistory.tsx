@@ -16,6 +16,14 @@ export default function ScanHistory() {
   const [dateRange, setDateRange] = useState<'24h' | '7d' | '30d' | 'all'>('7d');
   const [selectedScan, setSelectedScan] = useState<Scan | null>(null);
   const [selectedFindings, setSelectedFindings] = useState<Finding[]>([]);
+  // Report severity filter — informational findings are hidden by default.
+  const [hiddenSeverities, setHiddenSeverities] = useState<Set<string>>(new Set(['info']));
+  const toggleSeverity = (sev: string) =>
+    setHiddenSeverities(prev => {
+      const next = new Set(prev);
+      next.has(sev) ? next.delete(sev) : next.add(sev);
+      return next;
+    });
 
   const filtered = scans.filter(s => {
     const matchesSearch = !search || s.target.toLowerCase().includes(search.toLowerCase());
@@ -32,6 +40,14 @@ export default function ScanHistory() {
 
   const formatDuration = (ms: number) => (ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`);
   const severityOrder = ['critical', 'high', 'medium', 'low', 'info'] as const;
+  const SEVERITY_COLORS: Record<string, string> = { critical: '#DC2626', high: '#EF4444', medium: '#F59E0B', low: '#10B981', info: '#3B82F6' };
+
+  // Report findings filtered by the active severities.
+  const reportSevCounts = severityOrder.reduce((acc, s) => {
+    acc[s] = selectedFindings.filter(f => f.severity === s).length;
+    return acc;
+  }, {} as Record<string, number>);
+  const visibleFindings = selectedFindings.filter(f => !hiddenSeverities.has(f.severity));
 
   const openScan = async (scan: Scan) => {
     setSelectedScan(scan);
@@ -162,10 +178,10 @@ export default function ScanHistory() {
 
       {/* Report Modal */}
       <Dialog open={!!selectedScan} onOpenChange={() => setSelectedScan(null)}>
-        <DialogContent className="max-w-[820px] max-h-[85vh] p-0 overflow-hidden border flex flex-col gap-0" style={{ backgroundColor: 'var(--bg-secondary)', borderColor: 'var(--border-subtle)' }}>
+        <DialogContent className="max-w-[820px] max-h-[85vh] p-0 overflow-y-auto sentinel-scrollbar border flex flex-col gap-0" style={{ backgroundColor: 'var(--bg-secondary)', borderColor: 'var(--border-subtle)' }}>
           {selectedScan && (
             <>
-              <DialogHeader className="px-6 py-4 border-b shrink-0" style={{ borderColor: 'var(--border-subtle)' }}>
+              <DialogHeader className="px-6 py-4 border-b shrink-0 sticky top-0 z-20" style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--bg-secondary)' }}>
                 <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0">
                     <DialogTitle className="text-[15px] font-mono font-semibold truncate" style={{ color: 'var(--text-primary)' }}>{selectedScan.target}</DialogTitle>
@@ -186,16 +202,48 @@ export default function ScanHistory() {
                 </div>
               </DialogHeader>
 
-              <Tabs defaultValue="findings" className="flex flex-col flex-1 min-h-0 overflow-hidden">
+              <Tabs defaultValue="findings" className="flex flex-col">
                 <TabsList className="mx-6 mt-4 h-8 w-auto self-start" style={{ backgroundColor: 'var(--bg-tertiary)' }}>
-                  <TabsTrigger value="findings" className="text-[12px] h-6 px-3">Findings ({selectedFindings.length})</TabsTrigger>
+                  <TabsTrigger value="findings" className="text-[12px] h-6 px-3">
+                    Findings ({visibleFindings.length}{visibleFindings.length !== selectedFindings.length ? `/${selectedFindings.length}` : ''})
+                  </TabsTrigger>
                   <TabsTrigger value="terminal" className="text-[12px] h-6 px-3">Terminal Output</TabsTrigger>
                 </TabsList>
 
-                <TabsContent value="findings" className="flex-1 min-h-0 overflow-y-auto sentinel-scrollbar px-6 py-4 m-0">
-                  {selectedFindings.length > 0 ? (
+                <TabsContent value="findings" className="px-6 py-4 m-0">
+                  {/* Severity filter */}
+                  {selectedFindings.length > 0 && (
+                    <div className="flex flex-wrap items-center gap-2 mb-4">
+                      <span className="text-[11px] font-medium uppercase tracking-wider mr-1" style={{ color: 'var(--text-muted)' }}>Filter</span>
+                      {severityOrder.filter(s => reportSevCounts[s] > 0).map(sev => {
+                        const active = !hiddenSeverities.has(sev);
+                        return (
+                          <button key={sev} onClick={() => toggleSeverity(sev)}
+                            className="flex items-center gap-1.5 h-6 px-2 rounded-md text-[11px] font-medium capitalize transition-all border focus-ring"
+                            style={{
+                              backgroundColor: active ? `${SEVERITY_COLORS[sev]}22` : 'var(--bg-tertiary)',
+                              borderColor: active ? SEVERITY_COLORS[sev] : 'var(--border-subtle)',
+                              color: active ? SEVERITY_COLORS[sev] : 'var(--text-muted)',
+                              opacity: active ? 1 : 0.6,
+                            }}>
+                            <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: SEVERITY_COLORS[sev] }} />
+                            {sev} {reportSevCounts[sev]}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {visibleFindings.length > 0 ? (
                     <div className="space-y-3">
-                      {selectedFindings.map((finding, idx) => <FindingCard key={finding.id} finding={finding} index={idx} />)}
+                      {visibleFindings.map((finding, idx) => <FindingCard key={finding.id} finding={finding} index={idx} />)}
+                    </div>
+                  ) : selectedFindings.length > 0 ? (
+                    <div className="text-center py-10">
+                      <p className="text-[13px] font-medium" style={{ color: 'var(--text-primary)' }}>Nothing to show</p>
+                      <p className="text-[12px] mt-1" style={{ color: 'var(--text-muted)' }}>
+                        All {selectedFindings.length} findings are hidden by the filter — enable a severity above to see them.
+                      </p>
                     </div>
                   ) : (
                     <div className="text-center py-10">
@@ -208,7 +256,7 @@ export default function ScanHistory() {
                   )}
                 </TabsContent>
 
-                <TabsContent value="terminal" className="flex-1 min-h-0 overflow-hidden m-0">
+                <TabsContent value="terminal" className="m-0">
                   <TerminalView scan={selectedScan} />
                 </TabsContent>
               </Tabs>

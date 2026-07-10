@@ -215,6 +215,9 @@ function runNuclei(scanId, monitor) {
   }
   if (adv.userAgent) commonArgs.push('-H', `User-Agent: ${adv.userAgent}`);
   if (adv.followRedirects === false) commonArgs.push('-no-redirects');
+  // Authenticated scanning: pass custom headers (Cookie / Authorization: Bearer …).
+  const authHeaders = (Array.isArray(adv.authHeaders) ? adv.authHeaders : []).map(h => String(h).trim()).filter(Boolean);
+  for (const h of authHeaders) commonArgs.push('-H', h);
 
   // ── nuclei phase ──
   const startNuclei = (targetArgs) => {
@@ -307,6 +310,8 @@ function runNuclei(scanId, monitor) {
     const kargs = ['-u', monitor.url, '-d', String(depth), '-silent', '-fs', 'fqdn',
       '-timeout', String(adv.timeout || 15), '-ct', String(crawlTimeout), '-c', '15'];
     if (adv.userAgent) kargs.push('-H', `User-Agent: ${adv.userAgent}`);
+    // Crawl authenticated too, so login-only pages are discovered.
+    for (const h of (Array.isArray(adv.authHeaders) ? adv.authHeaders : []).map(x => String(x).trim()).filter(Boolean)) kargs.push('-H', h);
     term.push(`[INF] Crawling ${monitor.url} (depth ${depth}, max ${crawlTimeout}s / ${maxUrls} URLs)...`);
 
     let proc;

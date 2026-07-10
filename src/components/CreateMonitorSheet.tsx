@@ -516,6 +516,18 @@ export default function CreateMonitorSheet() {
                     style={{ backgroundColor: 'var(--bg-tertiary)', borderColor: 'var(--border-subtle)', color: 'var(--text-primary)' }}
                   />
                 </div>
+                <div className="space-y-1.5">
+                  <Label className="text-[11px] font-medium" style={{ color: 'var(--text-muted)' }}>Auth headers — scan logged-in (one per line)</Label>
+                  <textarea
+                    value={((advanced as any).authHeaders || []).join('\n')}
+                    onChange={e => setAdvanced(p => ({ ...p, authHeaders: e.target.value.split('\n') } as any))}
+                    rows={3}
+                    placeholder={'Authorization: Bearer eyJ...\nCookie: session=abc123'}
+                    className="w-full px-3 py-2 rounded-md text-[12px] font-mono focus-ring outline-none resize-y"
+                    style={{ backgroundColor: 'var(--bg-tertiary)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }}
+                  />
+                  <p className="text-[10px]" style={{ color: 'var(--text-muted)' }}>Sent with every request (nuclei + crawler) so the scan runs authenticated. Leave empty for unauthenticated.</p>
+                </div>
                 <div className="flex items-center justify-between">
                   <Label className="text-[12px] font-medium" style={{ color: 'var(--text-secondary)' }}>Follow Redirects</Label>
                   <Switch

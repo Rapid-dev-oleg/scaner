@@ -300,10 +300,14 @@ function runNuclei(scanId, monitor) {
   // ── crawl phase (opt-in): katana discovers URLs, then nuclei scans them all ──
   const startCrawl = (cb) => {
     const depth = Math.max(1, Math.min(5, Number(adv.crawlDepth) || 2));
+    const crawlTimeout = Math.max(10, Math.min(1800, Number(adv.crawlTimeout) || 120));
+    const maxUrls = Math.max(50, Math.min(10000, Number(adv.crawlMaxUrls) || 1500));
     const outFile = path.join(os.tmpdir(), `sentinel-crawl-${scanId}.txt`);
-    const kargs = ['-u', monitor.url, '-d', String(depth), '-silent', '-fs', 'fqdn', '-timeout', String(adv.timeout || 15)];
+    // -ct caps total crawl time; -c bumps concurrency so it doesn't crawl forever.
+    const kargs = ['-u', monitor.url, '-d', String(depth), '-silent', '-fs', 'fqdn',
+      '-timeout', String(adv.timeout || 15), '-ct', String(crawlTimeout), '-c', '15'];
     if (adv.userAgent) kargs.push('-H', `User-Agent: ${adv.userAgent}`);
-    term.push(`[INF] Crawling ${monitor.url} (depth ${depth})...`);
+    term.push(`[INF] Crawling ${monitor.url} (depth ${depth}, max ${crawlTimeout}s / ${maxUrls} URLs)...`);
 
     let proc;
     try {
@@ -316,6 +320,12 @@ function runNuclei(scanId, monitor) {
 
     const urls = new Set([monitor.url]);
     let buf = '';
+    let capped = false;
+    // Don't trust katana's own -ct on unresponsive targets — enforce our own cap.
+    const crawlKill = setTimeout(() => {
+      if (!capped) { capped = true; term.push(`[INF] Crawl time limit (${crawlTimeout}s) reached — scanning what was found`); }
+      try { proc.kill('SIGKILL'); } catch { /* ignore */ }
+    }, (crawlTimeout + 3) * 1000);
     const tick = setInterval(() => emit(scanId, {
       type: 'progress',
       progress: { phase: 'crawl', percent: 0, requests: urls.size, total: 0, rps: 0, matched: 0, errors: 0, duration: '' },
@@ -330,13 +340,19 @@ function runNuclei(scanId, monitor) {
         if (/^https?:\/\//i.test(u) && !urls.has(u)) {
           urls.add(u);
           if (urls.size % 25 === 0) term.push(`[INF] Crawled ${urls.size} URLs...`);
+          if (urls.size >= maxUrls && !capped) {
+            capped = true;
+            term.push(`[INF] Reached ${maxUrls} URL cap — finishing crawl`);
+            try { proc.kill('SIGTERM'); } catch { /* ignore */ }
+          }
         }
       }
     });
     proc.stderr.on('data', () => { /* katana progress noise ignored */ });
-    proc.on('error', () => { clearInterval(tick); term.push('[INF] katana not available — scanning base URL only'); cb(['-u', monitor.url]); });
+    proc.on('error', () => { clearInterval(tick); clearTimeout(crawlKill); term.push('[INF] katana not available — scanning base URL only'); cb(['-u', monitor.url]); });
     proc.on('close', () => {
       clearInterval(tick);
+      clearTimeout(crawlKill);
       if (settled) return;
       if (state.cancelled || state.timedOut) {
         settled = true;

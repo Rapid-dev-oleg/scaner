@@ -536,16 +536,27 @@ export default function CreateMonitorSheet() {
                     />
                   </div>
                   {(advanced as any).crawl && (
-                    <div className="mt-3 flex items-center gap-2">
-                      <Label className="text-[11px] font-medium" style={{ color: 'var(--text-muted)' }}>Crawl depth</Label>
-                      <Input
-                        type="number" min={1} max={5}
-                        value={(advanced as any).crawlDepth ?? 2}
-                        onChange={e => setAdvanced(p => ({ ...p, crawlDepth: Math.max(1, Math.min(5, Number(e.target.value) || 2)) } as any))}
-                        className="h-8 w-20 text-[12px] focus-ring"
-                        style={{ backgroundColor: 'var(--bg-secondary)', borderColor: 'var(--border-subtle)', color: 'var(--text-primary)' }}
-                      />
-                      <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>1–5 (higher = deeper, slower)</span>
+                    <div className="mt-3 grid grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <Label className="text-[11px] font-medium" style={{ color: 'var(--text-muted)' }}>Crawl depth (1–5)</Label>
+                        <Input
+                          type="number" min={1} max={5}
+                          value={(advanced as any).crawlDepth ?? 2}
+                          onChange={e => setAdvanced(p => ({ ...p, crawlDepth: Math.max(1, Math.min(5, Number(e.target.value) || 2)) } as any))}
+                          className="h-8 text-[12px] focus-ring"
+                          style={{ backgroundColor: 'var(--bg-secondary)', borderColor: 'var(--border-subtle)', color: 'var(--text-primary)' }}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-[11px] font-medium" style={{ color: 'var(--text-muted)' }}>Max crawl time (s)</Label>
+                        <Input
+                          type="number" min={10} max={1800}
+                          value={(advanced as any).crawlTimeout ?? 120}
+                          onChange={e => setAdvanced(p => ({ ...p, crawlTimeout: Math.max(10, Math.min(1800, Number(e.target.value) || 120)) } as any))}
+                          className="h-8 text-[12px] focus-ring"
+                          style={{ backgroundColor: 'var(--bg-secondary)', borderColor: 'var(--border-subtle)', color: 'var(--text-primary)' }}
+                        />
+                      </div>
                     </div>
                   )}
                 </div>
